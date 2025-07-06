@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <sys/errno.h>
 
+#define REQUEST_MAX_SIZE_BYTES (1000000 * 1) // 1mb
 #define BACKLOG 100
 #define PORT 80
 
@@ -34,24 +35,35 @@ void handler(int signum) {
 	sig = signum;
 }
 
-
-
-int main(void) {
-	// setup signal handler
+int setupsig() {
 	struct sigaction sa;
 	sa.__sigaction_u.__sa_handler = handler;
 	sigemptyset(&sa.sa_mask);
-	sa.sa_flags = SA_RESTART;
+	sa.sa_flags = SA_RESTART; // if a function gets interrupted by signal, restart the function
 	if (sigaction(SIGINT, &sa, NULL) == -1 || sigaction(SIGTERM, &sa, NULL)) {
 		perror("sigaction failed");
-		return EXIT_FAILURE;
+		return -1;
 	}
+	return 0;
+}
 
+int setuppipe() {
 	if (pipe(fildes) == -1) {
 		perror("pipe failed");
-		return EXIT_FAILURE;
+		return -1;
 	}
+	return 0;
+}
 
+enum IpProtocol {
+	IPV4, IPV6
+};
+
+int main(void) {
+	if (setuppipe() == -1)
+		return EXIT_FAILURE;
+	if (setupsig() == -1)
+		return EXIT_FAILURE;
 	const int listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 	const struct sockaddr_in address = {
 		// bind the listening socket to this address
@@ -87,7 +99,32 @@ int main(void) {
 			goto fatal;
 		}
 		printf("connected\n");
-		const char *data = "HTTP/1.1 200 Ok\nContent-Type: application/json\nContent-Length:6\n\nhello!";
+		char buf[REQUEST_MAX_SIZE_BYTES];
+		ssize_t msglen = recv(conn_fd, &buf, REQUEST_MAX_SIZE_BYTES, 0);
+		if (msglen == -1) {
+			perror("recv failed");
+			goto fatal;
+		}
+		if (msglen == 0) { // client closed tcp connection
+			close(conn_fd);
+			continue;
+		}
+		if (msglen == REQUEST_MAX_SIZE_BYTES) {
+			fprintf(stderr, "request size larger than max size, (%i bytes)\n", REQUEST_MAX_SIZE_BYTES);
+			close(conn_fd);
+			continue;
+		}
+		buf[msglen] = '\0';
+		char *ptr = &buf[0];
+		while (*ptr) {
+			if (*ptr == 13) {
+				ptr++;
+				continue;
+			}
+			printf("%c", *ptr);
+			ptr++;
+		}
+ 		const char *data = "HTTP/1.1 200 Ok\nContent-Type: application/json\nContent-Length:6\n\nhello!";
 		if (send(conn_fd, data, strlen(data), 0) == -1) {
 			perror("send failed");
 			close(conn_fd);

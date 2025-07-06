@@ -12,4 +12,4 @@ add_compile_options(
         -Wswitch-default -Wswitch-enum -Wcast-align
         -Wctor-dtor-privacy -Wdisabled-optimization)
 
-add_executable(http_server main.c)
+add_executable(http_server cli.c)
