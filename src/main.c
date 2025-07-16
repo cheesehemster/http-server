@@ -5,34 +5,19 @@
 #include <unistd.h>
 #include <sys/errno.h>
 
-#include "main.h"
+#include "server.h"
+#include "log.h"
 
 // this file handles the cli and process starting and stopping, it does not handle the server logic
 
-// add this later for better logging
-int log_printf(const char*, ...); // writes to the log file and writes to stdout when log stdout mode is on
-int debug_printf(const char*, ...); // writes to stdout when debug mode is on
-int verbose_printf(const char*, ...); // writes to stdout when verbose mode is on
-
-int stop();
-
-// check if chinook.pid exists
-// if it doesnt create it
-// fork()
-// put pid in chinook.pid
-
-// 1: file exists
-// 0: file doesn't exist
-// -1: error
 #define FILE_EXISTS 1
 #define FILE_ERROR (-1)
 #define FILE_NOT_EXISTS 0
-
 int file_exists(const char* path) {
 	FILE* tmp_fp = fopen(path, "r");
 	if (tmp_fp != NULL) {
 		if (fclose(tmp_fp) == EOF) {
-			perror("fclose failed");
+			sys_error_printf("fclose failed", __func__);
 			return FILE_ERROR;
 		}
 		return FILE_EXISTS;
@@ -40,25 +25,29 @@ int file_exists(const char* path) {
 	// opening a file that doesn't exist in read mode sets errno to ENOENT.
 	// ENOENT = No such file or directory
 	if (errno != ENOENT) {
-		perror("fopen for file exists failed");
+		sys_error_printf("fopen failed", __func__);
 		return FILE_ERROR;
 	}
 	return FILE_NOT_EXISTS;
 }
 
-int write_pid(pid_t pid, const char* path) {
+int write_pid(const pid_t pid, const char* path) {
+	if (path == NULL) {
+		lprintf(ERROR, "path char * argument to write_pid is null");
+		return -1;
+	}
 	FILE* fp = fopen(path, "w");
 	if (fp == NULL) {
-		perror("fopen failed");
+		sys_error_printf("fopen failed", __func__);
 		return -1;
 	}
 	size_t bytes_written = fwrite(&pid, sizeof(pid), 1, fp);
 	if (bytes_written == 0) {
-		perror("fwrite failed");
+		sys_error_printf("fwrite failed", __func__);
 		return -1;
 	}
 	if (fclose(fp) == -1) {
-		perror("fclose failed");
+		sys_error_printf("fclose failed", __func__);
 		return -1;
 	}
 	return 0;
@@ -77,7 +66,7 @@ int start(void) {
 	}
 	const pid_t pid = fork();
 	if (pid == -1) {
-		perror("fork() failed");
+		sys_error_printf("fork failed", __func__);
 		return -1;
 	}
 	// parent
@@ -91,9 +80,11 @@ int start(void) {
 		return 0;
 	}
 	// child
+	lprintf(LOG, "SERVER START");
 	int status = run_server();
+	lprintf(LOG, "SERVER STOP");
 	if (remove("/tmp/chinook.pid") == -1) {
-		perror("remove failed");
+		sys_error_printf("remove failed", __func__);
 		exit(EXIT_FAILURE);
 	}
 	if (status == -1) {
@@ -106,38 +97,35 @@ int stop(void) {
 	FILE* fp = fopen("/tmp/chinook.pid", "r");
 	if (fp == NULL) {
 		if (errno == ENOENT) {
-			fprintf(stderr, "server not running!\n");
+			lprintf(ERROR, "server not running!");
 			return -1;
 		}
-		perror("fopen failed");
+		sys_error_printf("fopen failed", __func__);
 		return -1;
 	}
 	pid_t pid;
 	size_t bytes_read = fread(&pid, sizeof(pid), 1, fp);
 	if (bytes_read == 0) {
 		if (ferror(fp)) {
-			perror("fread failed");
+			sys_error_printf("fread failed", __func__);
 		} else {
-			fprintf(stderr, ".pid file exists but is empty, try starting server?\n");
+			lprintf(ERROR, ".pid file exists but is empty, try starting server?");
 		}
 		if (fclose(fp) == EOF)
-			perror("fclose failed");
+			sys_error_printf("fclose failed", __func__);
 		return -1;
 	}
 	if (fclose(fp) == EOF) {
-		perror("fclose failed");
+		sys_error_printf("fclose failed", __func__);
 		return -1;
 	}
-	printf("pid: %i\n", pid);
 	if (kill(pid, SIGTERM) == -1) {
-		perror("kill failed");
+		sys_error_printf("kill failed", __func__);
 		if (errno == ESRCH) {
-			fprintf(
-				stderr,
-				"stop server failed, no such process, you might of stopped the process manually,\ncontinuing, will try deleting pid file\n");
+			lprintf(ERROR, "stop server failed, no such process, you might of stopped the process manually, continuing, will try deleting pid file");
 			remove("/tmp/chinook.pid");
 		} else {
-			fprintf(stderr, "stop server failed, try again 'chinook stop'\n");
+			lprintf(ERROR, "stop server failed, try again 'chinook stop'");
 			return -1;
 		}
 	}
@@ -146,8 +134,23 @@ int stop(void) {
 }
 
 int restart(void) {
-	if (stop() == -1 || start() == -1)
+	if (stop() == -1 || (sleep(1) && 0) || start() == -1)
 		return -1;
+	return 0;
+}
+
+int reset_log(void) {
+	char path[PATH_MAX];
+	snprintf(path, PATH_MAX, "%s/chinook_log.txt", getenv("HOME"));
+	FILE *fp = fopen(path, "w");
+	if (fp == NULL) {
+		sys_error_printf("fopen failed", __func__);
+		return -1;
+	}
+	if (fclose(fp) == -1) {
+		sys_error_printf("fclose failed", __func__);
+		return -1;
+	}
 	return 0;
 }
 
@@ -166,6 +169,8 @@ int main(int argc, char* argv[]) {
 		return stop() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 	if (strcmp(argv[1], "restart") == 0)
 		return restart() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+	if (strcmp(argv[1], "reset-log") == 0)
+		return reset_log() == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
 	printf("chinook: unknown command: '%s'. for help, 'chinook help'\n", argv[1]);
 	return EXIT_FAILURE;
 }

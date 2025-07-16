@@ -33,27 +33,39 @@ struct HttpBody {
 	size_t len;
 };
 
-struct HttpRequest {
-	struct HttpRequestLine request_line;
-	struct HttpHeaders headers;
-	struct HttpBody body;
-};
 
 
 struct HttpStatusLine {
-	enum HttpMethod method;
+	enum HttpVersion version;
 	int status_code;
 	char *reason_phrase;
 };
 
+struct HttpRequest {
+	struct HttpHeaders headers;
+	struct HttpBody body;
+	struct HttpRequestLine request_line;
+};
+
 struct HttpResponse {
+	struct HttpHeaders headers;
+	struct HttpBody body;
 	struct HttpStatusLine status_line;
-	struct HttpField fields[100];
+};
+
+struct HttpGeneric {
+	struct HttpHeaders headers;
 	struct HttpBody body;
 };
 
+struct HttpStorage {
+	struct HttpHeaders headers;
+};
+
 int parse_http_request(char* s, struct HttpRequest* h);
-void print_http_request_struct(struct HttpRequest *request);
+void print_http_request_struct(const struct HttpRequest *request);
+void print_http_response_struct(const struct HttpResponse *response);
 char *get_http_header(const char *key, const struct HttpHeaders *headers);
+int set_http_field(const char *key, const char *value, struct HttpHeaders *headers);
 
 #endif //PARSE_HTTP_H
