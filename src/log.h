@@ -1,6 +1,12 @@
 #ifndef LOG_H
 #define LOG_H
 
+#define lprintf(level, format, ...) \
+    ltprintf(level, __FILE_NAME__, __LINE__, __FUNCTION__, format __VA_OPT__(,) __VA_ARGS__)
+
+#define sys_error_printf(msg, ...) \
+	sys_error_tprintf(msg, __FILE_NAME__, __LINE__, __FUNCTION__ __VA_OPT__(,) __VA_ARGS__)
+
 enum LogLevel {
 	LOG,
 	DEBUG,
@@ -9,12 +15,7 @@ enum LogLevel {
 	CRITICAL_ERROR
 };
 
-/*int log_printf(const char*, ...); // writes to the log file and writes to stdout when log stdout mode is on
-int debug_printf(const char*, ...); // writes to stdout when debug mode is on
-int verbose_printf(const char*, ...); // writes to stdout when verbose mode is on
-int warn_printf(const char *, ...);
-int error_printf(const char *, ...);*/
-int sys_error_printf(const char *, const char *, ...);
-int lprintf(const enum LogLevel level, const char *format, ...);
+int ltprintf(const enum LogLevel level, const char *file, const unsigned int line, const char *func, const char *format, ...);
+int sys_error_tprintf(const char *msg, const char *file, const unsigned int line, const char *func, ...);
 
 #endif //LOG_H

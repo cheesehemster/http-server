@@ -31,7 +31,7 @@ int write_log_vprintf(const char *format, const va_list args) {
 	return 0;
 }
 
-int lvprintf(const enum LogLevel level, const char *format, const va_list args) {
+int log_format_vprintf(const enum LogLevel level, const char *format, const va_list args) {
 	const char *log_prefix = "";
 	const char *log_colour = "";
 	switch (level) {
@@ -65,27 +65,36 @@ int lvprintf(const enum LogLevel level, const char *format, const va_list args) 
 		const struct tm *ptr = gmtime(&t);
 		strftime(iso_time, 100, "%Y-%m-%dT%H:%M:%SZ", ptr);
 	}
-	snprintf(log_msg_buf_ansi, 1000, "%s%s %s %s\n\033[0m", log_colour, iso_time, log_prefix, format);
-	snprintf(log_msg_buf, 1000, "%s %s %s\n", iso_time, log_prefix, format);
+	snprintf(log_msg_buf_ansi, 1000, "%s%s %-10s %s\n\033[0m", log_colour, iso_time, log_prefix, format);
+	snprintf(log_msg_buf, 1000, "%s %-10s %s\n", iso_time, log_prefix, format);
 	write_log_vprintf(log_msg_buf, args);
 	vfprintf(stdout, log_msg_buf_ansi, args);
 	return 0;
 }
 
-int lprintf(const enum LogLevel level, const char *format, ...) {
+int ltvprintf(const enum LogLevel level, const char *file, const unsigned int line, const char *func, const char *format, const va_list args) {
+	char buf[1000];
+	vsnprintf(buf, 1000, format, args);
+	char buf2[1000];
+	snprintf(buf2, 1000, "%-100s --%s:%d %s()", buf, file, line, func);
+	log_format_vprintf(level, buf2, args);
+	return 0;
+}
+
+int ltprintf(const enum LogLevel level, const char *file, const unsigned int line, const char *func, const char *format, ...) {
 	va_list args;
 	va_start(args, format);
-	lvprintf(level, format, args);
+	ltvprintf(level, file, line, func, format, args);
 	va_end(args);
 	return 0;
 }
 
-int sys_error_printf(const char *msg, const char *func, ...) {
+int sys_error_tprintf(const char *msg, const char *file, const unsigned int line, const char *func, ...) {
 	char format[1000];
-	snprintf(format, 1000, "\"%s\": %s at %s()", msg, strerror(errno), func);
+	snprintf(format, 1000, "\"%s\": %s", msg, strerror(errno));
 	va_list args;
 	va_start(args, func);
-	lprintf(ERROR, format, args);
+	ltvprintf(ERROR, file, line, func, format, args);
 	va_end(args);
 	return 0;
 }

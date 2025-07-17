@@ -17,7 +17,7 @@ int file_exists(const char* path) {
 	FILE* tmp_fp = fopen(path, "r");
 	if (tmp_fp != NULL) {
 		if (fclose(tmp_fp) == EOF) {
-			sys_error_printf("fclose failed", __func__);
+			sys_error_printf("fclose failed");
 			return FILE_ERROR;
 		}
 		return FILE_EXISTS;
@@ -25,7 +25,7 @@ int file_exists(const char* path) {
 	// opening a file that doesn't exist in read mode sets errno to ENOENT.
 	// ENOENT = No such file or directory
 	if (errno != ENOENT) {
-		sys_error_printf("fopen failed", __func__);
+		sys_error_printf("fopen failed");
 		return FILE_ERROR;
 	}
 	return FILE_NOT_EXISTS;
@@ -38,16 +38,16 @@ int write_pid(const pid_t pid, const char* path) {
 	}
 	FILE* fp = fopen(path, "w");
 	if (fp == NULL) {
-		sys_error_printf("fopen failed", __func__);
+		sys_error_printf("fopen failed");
 		return -1;
 	}
 	size_t bytes_written = fwrite(&pid, sizeof(pid), 1, fp);
 	if (bytes_written == 0) {
-		sys_error_printf("fwrite failed", __func__);
+		sys_error_printf("fwrite failed");
 		return -1;
 	}
 	if (fclose(fp) == -1) {
-		sys_error_printf("fclose failed", __func__);
+		sys_error_printf("fclose failed");
 		return -1;
 	}
 	return 0;
@@ -66,7 +66,7 @@ int start(void) {
 	}
 	const pid_t pid = fork();
 	if (pid == -1) {
-		sys_error_printf("fork failed", __func__);
+		sys_error_printf("fork failed");
 		return -1;
 	}
 	// parent
@@ -76,7 +76,7 @@ int start(void) {
 			kill(pid, SIGTERM);
 			return -1;
 		}
-		waitpid(pid, NULL, 0);
+		waitpid(pid, nullptr, 0);
 		return 0;
 	}
 	// child
@@ -84,7 +84,7 @@ int start(void) {
 	int status = run_server();
 	lprintf(LOG, "SERVER STOP");
 	if (remove("/tmp/chinook.pid") == -1) {
-		sys_error_printf("remove failed", __func__);
+		sys_error_printf("remove failed");
 		exit(EXIT_FAILURE);
 	}
 	if (status == -1) {
@@ -95,32 +95,32 @@ int start(void) {
 
 int stop(void) {
 	FILE* fp = fopen("/tmp/chinook.pid", "r");
-	if (fp == NULL) {
+	if (fp == nullptr) {
 		if (errno == ENOENT) {
 			lprintf(ERROR, "server not running!");
 			return -1;
 		}
-		sys_error_printf("fopen failed", __func__);
+		sys_error_printf("fopen failed");
 		return -1;
 	}
 	pid_t pid;
 	size_t bytes_read = fread(&pid, sizeof(pid), 1, fp);
 	if (bytes_read == 0) {
 		if (ferror(fp)) {
-			sys_error_printf("fread failed", __func__);
+			sys_error_printf("fread failed");
 		} else {
 			lprintf(ERROR, ".pid file exists but is empty, try starting server?");
 		}
 		if (fclose(fp) == EOF)
-			sys_error_printf("fclose failed", __func__);
+			sys_error_printf("fclose failed");
 		return -1;
 	}
 	if (fclose(fp) == EOF) {
-		sys_error_printf("fclose failed", __func__);
+		sys_error_printf("fclose failed");
 		return -1;
 	}
 	if (kill(pid, SIGTERM) == -1) {
-		sys_error_printf("kill failed", __func__);
+		sys_error_printf("kill failed");
 		if (errno == ESRCH) {
 			lprintf(ERROR, "stop server failed, no such process, you might of stopped the process manually, continuing, will try deleting pid file");
 			remove("/tmp/chinook.pid");
@@ -144,11 +144,11 @@ int reset_log(void) {
 	snprintf(path, PATH_MAX, "%s/chinook_log.txt", getenv("HOME"));
 	FILE *fp = fopen(path, "w");
 	if (fp == NULL) {
-		sys_error_printf("fopen failed", __func__);
+		sys_error_printf("fopen failed");
 		return -1;
 	}
 	if (fclose(fp) == -1) {
-		sys_error_printf("fclose failed", __func__);
+		sys_error_printf("fclose failed");
 		return -1;
 	}
 	return 0;

@@ -9,29 +9,37 @@
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 // modifies str in place and places pointers into buf
-int str_split(char* str, const char* sep, char* buf[], const size_t bufn) {
-	if (bufn <= 0) {
-		lprintf(ERROR, "buffer size 0");
+ssize_t str_split(char* str, const char* sep, char* buf[], const size_t bufn) {
+	if (str == NULL) {
+		lprintf(ERROR, "str argument in %s() is NULL", __func__);
 		return -1;
 	}
-	const size_t seplen = strlen(sep);
-	if (seplen <= 0) {
+	if (sep == NULL) {
+		lprintf(ERROR, "sep argument in %s() is NULL", __func__);
+		return -1;
+	}
+	if (bufn == 0) {
+		lprintf(ERROR, __func__, "buffer size 0 in %s()");
+		return -1;
+	}
+	const size_t sep_len = strlen(sep);
+	if (sep_len == 0) {
 		lprintf(ERROR, "seperator string length 0");
 		return -1;
 	}
 	buf[0] = str;
-	unsigned i = 1;
+	size_t i = 1;
 	char* ptr;
 	while ((ptr = strstr(str, sep))) {
 		*ptr = '\0';
 		if (i >= bufn) {
-			return (int) i;
+			return (ssize_t)i;
 		}
-		str = ptr + seplen;
+		str = ptr + sep_len;
 		buf[i] = str;
 		i++;
 	}
-	return (int) i;
+	return (ssize_t)i;
 }
 
 void str_arr_print(const char* arr[], const size_t len) {
@@ -55,7 +63,7 @@ int strrepl(char* s, const char a, const char b) {
 
 int parse_http_headers(char* s, struct HttpHeaders* h) {
 	char* j[REQUEST_HEADER_FIELDS_LIMIT];
-	int i = str_split(s, "\r\n", j, REQUEST_HEADER_FIELDS_LIMIT);
+	ssize_t i = str_split(s, "\r\n", j, REQUEST_HEADER_FIELDS_LIMIT);
 	for (int r = 0; r < i; r++) {
 		char* c[2] = {0};
 		str_split(j[r], ": ", c, 2);
@@ -69,7 +77,7 @@ int parse_http_headers(char* s, struct HttpHeaders* h) {
 
 int parse_http_body(char* str, struct HttpBody* body) {
 	char* buf[2];
-	int n = str_split(str, "\r\n\r\n", buf, 2); // split body and headers
+	ssize_t n = str_split(str, "\r\n\r\n", buf, 2); // split body and headers
 	if (n != 2) {
 		lprintf(ERROR, "ill formed http request");
 		return -1;
@@ -129,7 +137,7 @@ enum HttpVersion parse_http_version(const char* s) {
 
 int parse_http_request_line(char* str, struct HttpRequestLine* request_line) {
 	char* buf[3];
-	int n = str_split(str, " ", buf, 3);
+	ssize_t n = str_split(str, " ", buf, 3);
 	if (n != 3) {
 		return -1;
 	}

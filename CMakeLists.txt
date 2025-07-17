@@ -15,3 +15,4 @@ add_compile_options(
 )
 
 add_executable(http_server src/main.c src/server.c src/parse_http.c src/log.c)
+#add_executable(http_server test.c)

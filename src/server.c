@@ -1,36 +1,32 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+#include <stdatomic.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/errno.h>
 
 #include "server.h"
 #include "parse_http.h"
 #include "log.h"
 
-#define BACKLOG 100
-
-// TODO: http parser
-// TODO: http header Connection:
 // TODO: cache
 // TODO: compression
 // TODO: https
 
-int fildes[2];
-// sig in case it's necessary
+int pipe_fds[2];
+atomic_bool thread_error;
 volatile sig_atomic_t sig;
 
-void handler(int signum) {
-	char buf = 'e';
-	if (write(fildes[1], &buf, 1) == -1) {
-		sys_error_printf("write failed", __func__);
+void signal_handler(int signum) {
+	char buf = 'a';
+	if (write(pipe_fds[1], &buf, sizeof(buf)) == -1) {
+		sys_error_printf("write failed");
 		lprintf(ERROR, "writing to pipe failed, exiting without cleanup");
-		// since the program cannot exit from pipe, exit early before anything bad happens.
-		// maybe refactor later to retry writing
 		exit(EXIT_FAILURE);
 	}
 	sig = signum;
@@ -38,11 +34,11 @@ void handler(int signum) {
 
 int setup_sig_handler() {
 	struct sigaction sa;
-	sa.__sigaction_u.__sa_handler = handler;
+	sa.__sigaction_u.__sa_handler = signal_handler;
 	sigemptyset(&sa.sa_mask);
 	sa.sa_flags = SA_RESTART; // if a function gets interrupted by signal, restart the function
-	if (sigaction(SIGINT, &sa, NULL) == -1 || sigaction(SIGTERM, &sa, NULL)) {
-		sys_error_printf("sigaction failed", __func__);
+	if (sigaction(SIGINT, &sa, nullptr) == -1 || sigaction(SIGTERM, &sa, NULL)) {
+		sys_error_printf("sigaction failed");
 		return -1;
 	}
 	return 0;
@@ -50,15 +46,19 @@ int setup_sig_handler() {
 
 int cleanup(int fd) {
 	if (close(fd) == -1) {
-		sys_error_printf("close failed", __func__);
+		sys_error_printf("close failed");
 		return -1;
 	}
 	return 0;
 }
 
+void setup_atomic() {
+	atomic_init(&thread_error, true);
+}
+
 int setup_pipe() {
-	if (pipe(fildes) == -1) {
-		sys_error_printf("pipe failed", __func__);
+	if (pipe(pipe_fds) == -1) {
+		sys_error_printf("pipe failed");
 		return -1;
 	}
 	return 0;
@@ -82,7 +82,7 @@ int ip_socket(enum IpProtocol ipp) {
 			return -1;
 	}
 	if (fd == -1) {
-		sys_error_printf("socket failed", __func__);
+		sys_error_printf("socket failed");
 		return -1;
 	}
 	return fd;
@@ -90,7 +90,8 @@ int ip_socket(enum IpProtocol ipp) {
 
 
 // 0 on failure
-socklen_t ip_sockaddr(struct sockaddr_storage* sockaddr, const enum IpProtocol ipp, const char *addr, const unsigned short port) {
+socklen_t ip_sockaddr(struct sockaddr_storage* sockaddr, const enum IpProtocol ipp, const char* addr,
+                      const unsigned short port) {
 	switch (ipp) {
 		case IPV4: {
 			struct sockaddr_in* tmp = (struct sockaddr_in *) sockaddr;
@@ -135,20 +136,21 @@ socklen_t ip_sockaddr(struct sockaddr_storage* sockaddr, const enum IpProtocol i
 
 
 // TODO: string for ip addr
-int setup_server_socket(const enum IpProtocol protocol, const char *ip_addr, const unsigned short port, const int backlog) {
+int setup_server_socket(const enum IpProtocol protocol, const char* ip_addr, const unsigned short port,
+                        const int backlog) {
 	const int socket_fd = ip_socket(IPV4);
 	if (socket_fd == -1)
 		return -1;
 	const int val = 1;
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(val)) == -1) {
-		sys_error_printf("setsockopt failed", __func__);
+		sys_error_printf("setsockopt failed");
 		goto cleanup_fail;
 	}
 	struct timeval t;
 	t.tv_sec = 0;
 	t.tv_usec = 10; // dont let the listen socket block
 	if (setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
-		sys_error_printf("setsockopt failed", __func__);
+		sys_error_printf("setsockopt failed");
 		goto cleanup_fail;
 	}
 	struct sockaddr_storage addr;
@@ -156,11 +158,11 @@ int setup_server_socket(const enum IpProtocol protocol, const char *ip_addr, con
 	if (size == 0)
 		goto cleanup_fail;
 	if (bind(socket_fd, (struct sockaddr *) &addr, size) == -1) {
-		sys_error_printf("bind failed", __func__);
+		sys_error_printf("bind failed");
 		goto cleanup_fail;
 	}
 	if (listen(socket_fd, backlog) == -1) {
-		sys_error_printf("listen failed", __func__);
+		sys_error_printf("listen failed");
 		goto cleanup_fail;
 	}
 	return socket_fd;
@@ -169,57 +171,82 @@ cleanup_fail:
 	return -1;
 }
 
-#define INTERRUPTED_SIGNAL (-1)
+enum wait_request_status {
+	WAIT_FIN = 0,
+	WAIT_INTERRUPTED = -1
+};
 
-int wait_request(const int fd, const int pipefds[2]) {
-	fd_set fdset;
-	FD_ZERO(&fdset);
-	FD_SET(fd, &fdset);
-	FD_SET(pipefds[0], &fdset);
-	select(MAX(fd, fildes[0]) + 1, &fdset, NULL, NULL, NULL); // blocks indefinitely until ready
-	if (FD_ISSET(pipefds[0], &fdset)) {
-		return INTERRUPTED_SIGNAL;
+enum wait_request_status wait_request(const int listen_fd, int pipefds[2]) {
+	fd_set fd_set;
+	FD_ZERO(&fd_set);
+	FD_SET(listen_fd, &fd_set);
+	FD_SET(pipefds[0], &fd_set);
+	select(MAX(listen_fd, pipefds[0]) + 1, &fd_set, NULL, NULL, NULL); // blocks indefinitely until ready
+	if (FD_ISSET(pipefds[0], &fd_set)) {
+		return WAIT_INTERRUPTED;
 	}
-	return 0;
+	return WAIT_FIN;
 }
 
-
-#define GOTO_ERR (-1)
-#define CONTINUE (-2)
-
-int connect_request(const int listen_fd) {
-	struct sockaddr conn_addr;
-	socklen_t conn_addr_len;
-	int conn_fd = accept(listen_fd, &conn_addr, &conn_addr_len); // non-blocking, select already blocked
-	if (conn_fd == -1) {
-		sys_error_printf("accept failed", __func__);
+int connect_client(const int listen_fd, struct sockaddr_storage* client_addr, socklen_t* client_addr_len) {
+	int client_fd = accept(listen_fd, (struct sockaddr *) client_addr, client_addr_len);
+	if (client_fd == -1) {
+		sys_error_printf("accept failed");
 		return -1;
 	}
 	struct timeval t;
-	t.tv_sec = 0;
-	t.tv_usec = 100000; // 100ms
-	if (setsockopt(conn_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
-		sys_error_printf("setsockopt failed", __func__);
+	t.tv_sec = 10;
+	t.tv_usec = 0;
+	if (setsockopt(client_fd, SOL_SOCKET, SO_RCVTIMEO, &t, sizeof(t)) == -1) {
+		sys_error_printf("setsockopt failed");
 	}
-	return conn_fd;
+	return client_fd;
 }
 
-int get_response(const int conn_fd, char buf[], const size_t bufn) {
-	ssize_t msglen = recv(conn_fd, buf, bufn, 0); // THIS GRRRR // the error was that i sent the &buf which is a char **
+char* sockaddr_get_ip_str(const struct sockaddr_storage* socka, char buf[], const socklen_t bufn) {
+	void* addr;
+	switch (socka->ss_family) {
+		case AF_INET:
+			//lprintf(DEBUG, "ipv4 client");
+			addr = &((struct sockaddr_in *) socka)->sin_addr;
+			break;
+		case AF_INET6:
+			//lprintf(DEBUG, "ipv6 client");
+			addr = &(((struct sockaddr_in6 *) socka)->sin6_addr);
+			break;
+		default:
+			lprintf(ERROR, "client unsupported protocol");
+			return NULL;
+	}
+	inet_ntop(socka->ss_family, addr, buf, bufn);
+	return buf;
+}
+
+#define GOTO_ERR (-1)
+#define CONTINUE (-2)
+#define TIMEOUT (-3)
+#define CLOSED (-4)
+
+ssize_t get_response(const int conn_fd, char buf[], const size_t bufn) {
+	const ssize_t msglen = recv(conn_fd, buf, bufn, 0);
 	if (msglen == -1) {
-		sys_error_printf("recv failed", __func__);
+		if (errno == EAGAIN) {
+			// connection timeout
+			lprintf(LOG, "connection timeout");
+			return TIMEOUT;
+		}
+		sys_error_printf("recv failed");
 		return GOTO_ERR;
 	}
 	if (msglen == 0) {
-		// client closed tcp connection, not an error, continue
-		return CONTINUE;
+		lprintf(DEBUG, "client closed tcp");
+		return CLOSED;
 	}
 	if ((size_t) msglen >= bufn) {
 		lprintf(ERROR, "request size larger than max size, (%zu bytes)", bufn);
 		return CONTINUE;
 	}
-	buf[msglen] = '\0'; // GRRR YOU WASTED ALL THIS TIME // not actually the culprit, but it creates the error
-	return 0;
+	return msglen;
 }
 
 void print_str_no_cr(const char* str) {
@@ -230,48 +257,84 @@ void print_str_no_cr(const char* str) {
 	}
 }
 
-int run_server(void) {
-	if (setup_pipe() == -1 || setup_sig_handler() == -1)
-		return -1;
-	int listen_fd = setup_server_socket(IPV4, "0.0.0.0", 80, BACKLOG);
-	if (listen_fd == -1)
-		return -1;
-	while (1) {
-		if (wait_request(listen_fd, fildes) == INTERRUPTED_SIGNAL)
-			goto signal_interrupt_cleanup;
-		const int conn_fd = connect_request(listen_fd);
-		if (conn_fd == -1)
-			goto error_cleanup;
+struct server_options {
+	enum IpProtocol protocol;
+	char* addr;
+	short port;
+
+	struct {
+		int backlog;
+	} special;
+};
+
+struct thread_args {
+	int listen_fd;
+};
+
+void* handle_connection(void* vargp) {
+	struct thread_args* args = (struct thread_args *) vargp;
+	int listen_fd = args->listen_fd;
+	struct sockaddr_storage client_addr;
+	socklen_t client_addr_len = sizeof(client_addr);
+	const int client_fd = connect_client(listen_fd, &client_addr, &client_addr_len);
+	if (client_fd == -1)
+		goto error_cleanup;
+	lprintf(DEBUG, "TCP CONNECTED");
+	{
+		char ip_str_buf[1000];
+		lprintf(DEBUG, "client ip: %s", sockaddr_get_ip_str(&client_addr, ip_str_buf, sizeof(ip_str_buf)));
+	}
+	int keep_alive = 1;
+	while (keep_alive) {
 		char buf[REQUEST_MAX_SIZE_BYTES];
-		int status = get_response(conn_fd, buf, REQUEST_MAX_SIZE_BYTES);
-		if (status != 0) {
-			close(conn_fd);
-			if (status == GOTO_ERR)
-				goto error_cleanup;
-			if (status == CONTINUE)
-				continue;
+		const ssize_t len = get_response(client_fd, buf, REQUEST_MAX_SIZE_BYTES);
+		if (len < 0) {
+			switch (len) {
+				case GOTO_ERR: goto error_cleanup;
+				case CONTINUE:
+				case CLOSED:
+				case TIMEOUT: goto next;
+				default: lprintf(ERROR, "return code fall through case at %s");
+			}
 		}
 		struct HttpRequest req;
 		if (parse_http_request(buf, &req) == -1) {
 			goto error_cleanup;
 		}
-		struct HttpResponse res;
-		res.status_line.version = HTTP_VERSION_1_1;
-		res.status_line.status_code = 200;
-		char rp[] = "Ok";
-		res.status_line.reason_phrase = rp;
-		res.body.ptr = NULL;
-		res.body.len = 0;
-		print_http_request_struct(&req);
-		set_http_field("Content-Type", "application/json", &res.headers);
-		set_http_field("Content-Length", "6", &res.headers);
-		//print_http_response_struct(&res);
-		const char* data = "HTTP/1.1 200 Ok\nContent-Type: application/json\nContent-Length:6\n\nhello!";
-		if (send(conn_fd, data, strlen(data), 0) == -1) {
-			sys_error_printf("send failed", __func__);
+		if (get_http_header("Connection", &req.headers) && !STRING_EQ(get_http_header("Connection", &req.headers),
+		                                                              "keep-alive")) {
+			lprintf(DEBUG, "client sent Connection: close");
+			keep_alive = 0;
+		}
+		lprintf(LOG, "%s", req.request_line.uri);
+		const char* data =
+			"HTTP/1.1 200 Ok\r\nContent-Type: application/json\r\nContent-Length:6\r\nConnection: keep-alive\r\n\r\nhello!";
+		if (send(client_fd, data, strlen(data), 0) == -1) {
+			sys_error_printf("send failed");
 			goto error_cleanup;;
 		}
-		close(conn_fd);
+	}
+next:
+	close(client_fd);
+	lprintf(DEBUG, "TCP DISCONNECTED");
+	return NULL;
+}
+
+int run_server() {
+	setup_atomic();
+	if (setup_pipe() == -1 || setup_sig_handler() == -1)
+		return -1;
+	int listen_fd = setup_server_socket(IPV4, "0.0.0.0", 80, 100);
+	if (listen_fd == -1)
+		return -1;
+	while (1) {
+		if (wait_request(listen_fd, pipe_fds) == WAIT_INTERRUPTED)
+			goto signal_interrupt_cleanup;
+		pthread_t thread_id;
+		struct thread_args targs;
+		targs.listen_fd = listen_fd;
+		pthread_create(&thread_id, nullptr, handle_connection, &targs);
+		pthread_detach(thread_id);
 	}
 error_cleanup:
 	lprintf(LOG, "an error occurred, cleaning up...");
