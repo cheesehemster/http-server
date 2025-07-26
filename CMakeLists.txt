@@ -9,10 +9,39 @@ add_compile_options(
         -Wshadow -Wconversion -Wsign-conversion -Wold-style-cast
         -Wredundant-decls -Wunreachable-code -Winit-self
         -Wmissing-declarations -Wformat=2 -Wfloat-equal
-        -Wswitch-default -Wswitch-enum -Wcast-align
+        -Wswitch-enum -Wcast-align
         -Wctor-dtor-privacy
-        -Wdisabled-optimization
+        #-Wdisabled-optimization
+        #-Wswitch-default
 )
 
-add_executable(http_server src/main.c src/server.c src/parse_http.c src/log.c)
-#add_executable(http_server test.c)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+
+include_directories(src)
+
+set(TEST_FILE 1)
+
+if (TEST_FILE)
+    add_executable(http_server
+            src/json_parse.c
+            src/json_parse.h
+    )
+else()
+    add_executable(http_server
+            src/main.c
+
+            src/server.c
+            src/server.h
+
+            src/parse_http.c
+            src/parse_http.h
+
+            src/log.c
+            src/log.h
+
+            src/thread_pool.c
+            src/thread_pool.h
+            src/json_parse.c
+            src/json_parse.h
+    )
+endif()

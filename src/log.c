@@ -82,6 +82,11 @@ int ltvprintf(const enum LogLevel level, const char *file, const unsigned int li
 }
 
 int ltprintf(const enum LogLevel level, const char *file, const unsigned int line, const char *func, const char *format, ...) {
+	/*
+	if (level != ERROR) {
+		return 0;
+	}
+	*/
 	va_list args;
 	va_start(args, format);
 	ltvprintf(level, file, line, func, format, args);

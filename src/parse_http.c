@@ -9,7 +9,7 @@
 #define ARR_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 // modifies str in place and places pointers into buf
-ssize_t str_split(char* str, const char* sep, char* buf[], const size_t bufn) {
+ssize_t str_split(char *str, const char *sep, char *buf[], const size_t bufn) {
 	if (str == NULL) {
 		lprintf(ERROR, "str argument in %s() is NULL", __func__);
 		return -1;
@@ -29,27 +29,27 @@ ssize_t str_split(char* str, const char* sep, char* buf[], const size_t bufn) {
 	}
 	buf[0] = str;
 	size_t i = 1;
-	char* ptr;
+	char *ptr;
 	while ((ptr = strstr(str, sep))) {
 		*ptr = '\0';
 		if (i >= bufn) {
-			return (ssize_t)i;
+			return (ssize_t) i;
 		}
 		str = ptr + sep_len;
 		buf[i] = str;
 		i++;
 	}
-	return (ssize_t)i;
+	return (ssize_t) i;
 }
 
-void str_arr_print(const char* arr[], const size_t len) {
+void str_arr_print(const char *arr[], const size_t len) {
 	for (size_t i = 0; i < len; i++) {
 		printf("%s\n", arr[i]);
 	}
 }
 
 // in s, replace all a with b
-int strrepl(char* s, const char a, const char b) {
+int strrepl(char *s, const char a, const char b) {
 	if (s == NULL) {
 		return -1;
 	}
@@ -61,11 +61,11 @@ int strrepl(char* s, const char a, const char b) {
 	return 0;
 }
 
-int parse_http_headers(char* s, struct HttpHeaders* h) {
-	char* j[REQUEST_HEADER_FIELDS_LIMIT];
+int parse_http_headers(char *s, headers_t *h) {
+	char *j[REQUEST_HEADER_FIELDS_LIMIT];
 	ssize_t i = str_split(s, "\r\n", j, REQUEST_HEADER_FIELDS_LIMIT);
 	for (int r = 0; r < i; r++) {
-		char* c[2] = {0};
+		char *c[2] = {0};
 		str_split(j[r], ": ", c, 2);
 		h->fields[r].key = c[0];
 		h->fields[r].value = c[1];
@@ -75,8 +75,8 @@ int parse_http_headers(char* s, struct HttpHeaders* h) {
 	return 0;
 }
 
-int parse_http_body(char* str, struct HttpBody* body) {
-	char* buf[2];
+int parse_http_body(char *str, struct HttpBody *body) {
+	char *buf[2];
 	ssize_t n = str_split(str, "\r\n\r\n", buf, 2); // split body and headers
 	if (n != 2) {
 		lprintf(ERROR, "ill formed http request");
@@ -91,9 +91,9 @@ int parse_http_body(char* str, struct HttpBody* body) {
 	return 0;
 }
 
-enum HttpMethod parse_http_method(const char* s) {
+enum HttpMethod parse_http_method(const char *s) {
 	typedef struct {
-		const char* s_method;
+		const char *s_method;
 		const enum HttpMethod enum_method;
 	} table_t;
 	const table_t table[] = {
@@ -117,9 +117,9 @@ enum HttpMethod parse_http_method(const char* s) {
 
 // TODO: allow http binary data
 
-enum HttpVersion parse_http_version(const char* s) {
+enum HttpVersion parse_http_version(const char *s) {
 	typedef struct {
-		const char* s_version;
+		const char *s_version;
 		const enum HttpVersion enum_version;
 	} table_t;
 	const table_t table[] = {
@@ -135,8 +135,8 @@ enum HttpVersion parse_http_version(const char* s) {
 	return HTTP_VERSION_UNKNOWN;
 }
 
-int parse_http_request_line(char* str, struct HttpRequestLine* request_line) {
-	char* buf[3];
+int parse_http_request_line(char *str, struct HttpRequestLine *request_line) {
+	char *buf[3];
 	ssize_t n = str_split(str, " ", buf, 3);
 	if (n != 3) {
 		return -1;
@@ -153,7 +153,7 @@ int parse_http_request_line(char* str, struct HttpRequestLine* request_line) {
 	return 0;
 }
 
-void print_http_request_struct(const struct HttpRequest* request) {
+void print_http_request_struct(const struct HttpRequest *request) {
 	printf("method enum: \"%i\"\n", request->request_line.method);
 	printf("uri: \"%s\"\n", request->request_line.uri);
 	printf("version enum: \"%i\"\n", request->request_line.version);
@@ -165,7 +165,7 @@ void print_http_request_struct(const struct HttpRequest* request) {
 	}
 }
 
-void print_http_response_struct(const struct HttpResponse* response) {
+void print_http_response_struct(const struct HttpResponse *response) {
 	printf("version enum: \"%i\"\n", response->status_line.version);
 	printf("status code: \"%i\"\n", response->status_line.status_code);
 	printf("reason phrase: \"%s\"\n", response->status_line.reason_phrase);
@@ -177,7 +177,7 @@ void print_http_response_struct(const struct HttpResponse* response) {
 	}
 }
 
-int parse_http_request(char* s, struct HttpRequest* h) {
+int parse_http_request(char *s, struct HttpRequest *h) {
 	const size_t len = strlen(s);
 	if (len <= 0 || len > REQUEST_MAX_SIZE_BYTES) {
 		lprintf(ERROR, "size (%lu) bytes of http request is out of range (0 - %i)", len, REQUEST_MAX_SIZE_BYTES);
@@ -186,8 +186,8 @@ int parse_http_request(char* s, struct HttpRequest* h) {
 	if (parse_http_body(s, &h->body) == -1) {
 		return -1;
 	}
-	char* ptr_header_start; {
-		char* tmp_ptr = strstr(s, "\r\n");
+	char *ptr_header_start; {
+		char *tmp_ptr = strstr(s, "\r\n");
 		*tmp_ptr = '\0';
 		ptr_header_start = tmp_ptr + 2;
 	}
@@ -196,7 +196,7 @@ int parse_http_request(char* s, struct HttpRequest* h) {
 	return 0;
 }
 
-char* get_http_header(const char* key, const struct HttpHeaders* headers) {
+char *get_http_header(const char *key, const headers_t *headers) {
 	const size_t len = headers->nfields;
 	for (size_t i = 0; i < len; i++) {
 		if (strcmp(key, headers->fields[i].key) == 0) {
@@ -207,11 +207,11 @@ char* get_http_header(const char* key, const struct HttpHeaders* headers) {
 }
 
 
-int set_http_field(const char* key, const char* value, struct HttpHeaders* headers) {
+int set_http_field(char *key, char *value, headers_t *headers) {
 	const size_t len = headers->nfields;
 	for (size_t i = 0; i < len; i++) {
-		if (strcmp(key, headers->fields[i].key) == 0) {
-			headers->fields[i].value = (char *) value;
+		if (STR_EQ(key, headers->fields[i].key)) {
+			headers->fields[i].value = value;
 			return 0;
 		}
 	}
@@ -220,10 +220,3 @@ int set_http_field(const char* key, const char* value, struct HttpHeaders* heade
 	headers->nfields++;
 	return 0;
 }
-
-// i wish you could do something like this in c
-// FileHandlerRAII file = fopen("path");
-// closes on dealloc
-// ~FileHandlerRAII() {
-//   if (fclose(m_fp) == -1) throw err
-// }
